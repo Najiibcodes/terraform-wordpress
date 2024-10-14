@@ -1,62 +1,53 @@
-provider "aws" {
-  region = "eu-west-2"
+module "vpc" {
+  source   = "./modules/vpc"
+  vpc_cidr = var.vpc_cidr
+  name     = var.vpc_name
 }
 
-# Create VPC
-resource "aws_vpc" "my_vpc" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true
+module "subnet" {
+  source      = "./modules/subnet"
+  vpc_id      = module.vpc.vpc_id
+  subnet_cidr = var.subnet_cidr
+  name        = var.subnet_name
 }
 
-# Create Subnet
-resource "aws_subnet" "my_subnet" {
-  vpc_id     = aws_vpc.my_vpc.id
-  cidr_block = "10.0.0.0/24"
+module "security_group" {
+  source = "./modules/security_group"
+  vpc_id = module.vpc.vpc_id
+  name   = var.sg_name
 }
 
-# Create Security Group
-resource "aws_security_group" "wordpress_sg" {
-  vpc_id = aws_vpc.my_vpc.id
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "wordpress-security-group"
-  }
+module "ec2" {
+  source             = "./modules/ec2"
+  ami                = var.ami
+  instance_type      = var.instance_type
+  subnet_id          = module.subnet.subnet_id
+  security_group_ids = [module.security_group.security_group_id]
+  
+ 
+  user_data = file(var.user_data)
 }
 
-# Create EC2 Instance
-resource "aws_instance" "wordpress" {
-  ami           = "ami-0b4c7755cdf0d9219"  
-  instance_type = "t2.micro"
-  key_name      = "Terraform"  
-  subnet_id     = aws_subnet.my_subnet.id
-  vpc_security_group_ids = [aws_security_group.wordpress_sg.id]  
 
-  # Automate WordPress installation with cloud-init
-  user_data = file("wordpress-cloud-init.sh")
+module "eip" {
+  source      = "./modules/eip"
+  instance_id = module.ec2.instance_id
+  name        = var.eip_name
 
-  tags = {
-    Name = "WordPress-Instance"
-  }
+  depends_on = [module.ec2]  
+}
+
+
+module "internet_gateway" {
+  source = "./modules/internet_gateway"
+  vpc_id = module.vpc.vpc_id
+  name   = var.igw_name
+}
+
+module "route_table" {
+  source              = "./modules/route_table"
+  vpc_id              = module.vpc.vpc_id
+  internet_gateway_id = module.internet_gateway.internet_gateway_id
+  subnet_id           = module.subnet.subnet_id
+  name                = var.route_table_name
 }
